@@ -1,0 +1,185 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email.lower() == "rodrigotga123@gmail.com" || 
+         request.auth.uid == "zULhdylsVDcCoOcx4I0BatiMgtj2");
+    }
+
+    function getProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isTrainer() {
+      return isAuthenticated() && getProfile().role == 'trainer';
+    }
+
+    function isTrainerOf(studentId) {
+      return isTrainer() && get(/databases/$(database)/documents/users/$(studentId)).data.treinadorId == request.auth.uid;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isStudentOfTrainer() {
+      return isTrainer() && resource.data.treinadorId == request.auth.uid;
+    }
+
+    function isValidUser(data) {
+      return data.fullName is string && data.fullName.size() > 0 && data.fullName.size() < 100 &&
+             data.email is string && data.email.size() < 100 &&
+             data.tipo in ['aluno', 'treinador', 'admin'] &&
+             data.role in ['user', 'trainer', 'admin'] &&
+             (!('birthDate' in data) || data.birthDate is string) &&
+             (!('protocolo' in data) || data.protocolo is string);
+    }
+
+    // User Profile Rules
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin() || (isTrainer() && resource.data.treinadorId == request.auth.uid);
+      allow create: if (isOwner(userId) && isValidUser(request.resource.data)) || 
+                      (isAdmin() && isValidUser(request.resource.data)) ||
+                      (isTrainer() && 
+                       request.resource.data.treinadorId == request.auth.uid && 
+                       request.resource.data.role == 'user' &&
+                       isValidUser(request.resource.data));
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data)) || 
+                      (isAdmin() && isValidUser(request.resource.data)) ||
+                      (isTrainer() && 
+                       resource.data.treinadorId == request.auth.uid && 
+                       request.resource.data.role == 'user' &&
+                       isValidUser(request.resource.data));
+      allow delete: if isAdmin();
+    }
+
+    // Community Posts
+    match /posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['likes', 'comments']));
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Weekly Check-ins
+    match /weekly_checkins/{checkinId} {
+      allow read: if isDocOwner() || isAdmin() || isTrainerOf(resource.data.userId);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Notifications
+    match /notifications/{id} {
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAdmin() || isTrainer();
+      allow update: if isOwner(resource.data.userId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if isOwner(resource.data.userId);
+    }
+
+    // Assessments, Workouts, Evolution
+    match /assessments/{id} {
+      allow read: if isDocOwner() || isAdmin() || isTrainerOf(resource.data.userId);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isDocOwner() || isAdmin();
+    }
+    match /workouts/{id} {
+      allow read: if isDocOwner() || isAdmin() || isTrainerOf(resource.data.userId);
+      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin() || isTrainer());
+      allow update, delete: if isDocOwner() || isAdmin() || isTrainerOf(resource.data.userId);
+    }
+
+    match /weekly_plans/{id} {
+      allow read: if isDocOwner() || isAdmin() || isTrainerOf(resource.data.userId);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isDocOwner() || isAdmin();
+    }
+
+    match /workout_logs/{id} {
+      allow read: if isDocOwner() || isAdmin() || isTrainerOf(resource.data.userId);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isDocOwner() || isAdmin();
+    }
+
+    match /workout_feedback/{id} {
+      allow read: if isDocOwner() || isAdmin() || isTrainerOf(resource.data.userId);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isDocOwner() || isAdmin();
+    }
+
+    match /daily_activities/{id} {
+      allow read: if isDocOwner() || isAdmin() || isTrainerOf(resource.data.userId);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isDocOwner() || isAdmin();
+    }
+
+    // Trainer Workouts (Templates)
+    match /trainer_workouts/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || isTrainer();
+      allow update, delete: if isAdmin() || isTrainer();
+    }
+
+    // Challenges
+    match /challenges/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || isTrainer();
+      allow update, delete: if isAdmin() || isTrainer();
+    }
+
+    // Trainer Observations
+    match /trainer_observations/{id} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin() || isTrainer());
+      allow create: if isAdmin() || isTrainer();
+      allow update, delete: if isAdmin() || isTrainer();
+    }
+
+    // Trainer Finance
+    match /trainer_finance/{id} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && resource.data.trainerId == request.auth.uid));
+      allow create: if isAuthenticated() && (isAdmin() || request.resource.data.trainerId == request.auth.uid);
+      allow update: if isAuthenticated() && (isAdmin() || resource.data.trainerId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // Trainer Invites
+    match /invites/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isAdmin() || request.resource.data.userId == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (resource != null && resource.data.userId == request.auth.uid);
+    }
+
+    // Trainer-Student Relationships
+    match /trainer_student_relationships/{id} {
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid || resource.data.trainerId == request.auth.uid);
+      allow create: if isAuthenticated() && (isAdmin() || request.resource.data.trainerId == request.auth.uid);
+      allow update: if isAuthenticated() && (isAdmin() || resource.data.trainerId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // User Analyses
+    match /user_analyses/{id} {
+      allow read: if isDocOwner() || isAdmin() || isTrainerOf(resource.data.userId);
+      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin() || isTrainer());
+      allow update, delete: if isAdmin();
+    }
+
+    // Trainer Financial History
+    match /trainer_financial_history/{id} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && resource.data.trainerId == request.auth.uid));
+      allow create: if isAuthenticated() && (isAdmin() || request.resource.data.trainerId == request.auth.uid);
+      allow update: if isAuthenticated() && (isAdmin() || resource.data.trainerId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+  }
+}
