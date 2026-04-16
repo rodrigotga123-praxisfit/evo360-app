@@ -1,5 +1,0 @@
-{
-  "name": "EVO 360",
-  "description": "Ecossistema fitness inteligente com análise comportamental, física e por imagem via IA.",
-  "requestFramePermissions": ["camera"]
-}
